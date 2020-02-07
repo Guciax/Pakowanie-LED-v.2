@@ -33,6 +33,9 @@
     <WarningLevel>4</WarningLevel>
   </PropertyGroup>
   <ItemGroup>
+    <Reference Include="ObjectListView, Version=2.9.1.1072, Culture=neutral, PublicKeyToken=b1c5bf581481bcd4, processorArchitecture=MSIL">
+      <HintPath>..\packages\ObjectListView.Official.2.9.1\lib\net20\ObjectListView.dll</HintPath>
+    </Reference>
     <Reference Include="System" />
     <Reference Include="System.Core" />
     <Reference Include="System.Xml.Linq" />
@@ -46,14 +49,49 @@
     <Reference Include="System.Xml" />
   </ItemGroup>
   <ItemGroup>
-    <Compile Include="Form1.cs">
+    <Compile Include="DataStorage\CurrentBoxData.cs" />
+    <Compile Include="DataStorage\CurrentOrderBoxing.cs" />
+    <Compile Include="DataStorage\KittingData.cs" />
+    <Compile Include="DataStorage\TestResults.cs" />
+    <Compile Include="DataStorage\VisualInspectionResults.cs" />
+    <Compile Include="Forms\ChangeBoxId.cs">
       <SubType>Form</SubType>
     </Compile>
-    <Compile Include="Form1.Designer.cs">
+    <Compile Include="Forms\ChangeBoxId.Designer.cs">
+      <DependentUpon>ChangeBoxId.cs</DependentUpon>
+    </Compile>
+    <Compile Include="Forms\Form1.cs">
+      <SubType>Form</SubType>
+    </Compile>
+    <Compile Include="Forms\Form1.Designer.cs">
       <DependentUpon>Form1.cs</DependentUpon>
+    </Compile>
+    <Compile Include="Forms\MovePcbToBox.cs">
+      <SubType>Form</SubType>
+    </Compile>
+    <Compile Include="Forms\MovePcbToBox.Designer.cs">
+      <DependentUpon>MovePcbToBox.cs</DependentUpon>
+    </Compile>
+    <Compile Include="Forms\ScanBoxQr.cs">
+      <SubType>Form</SubType>
+    </Compile>
+    <Compile Include="Forms\ScanBoxQr.Designer.cs">
+      <DependentUpon>ScanBoxQr.cs</DependentUpon>
     </Compile>
     <Compile Include="Program.cs" />
     <Compile Include="Properties\AssemblyInfo.cs" />
+    <EmbeddedResource Include="Forms\ChangeBoxId.resx">
+      <DependentUpon>ChangeBoxId.cs</DependentUpon>
+    </EmbeddedResource>
+    <EmbeddedResource Include="Forms\Form1.resx">
+      <DependentUpon>Form1.cs</DependentUpon>
+    </EmbeddedResource>
+    <EmbeddedResource Include="Forms\MovePcbToBox.resx">
+      <DependentUpon>MovePcbToBox.cs</DependentUpon>
+    </EmbeddedResource>
+    <EmbeddedResource Include="Forms\ScanBoxQr.resx">
+      <DependentUpon>ScanBoxQr.cs</DependentUpon>
+    </EmbeddedResource>
     <EmbeddedResource Include="Properties\Resources.resx">
       <Generator>ResXFileCodeGenerator</Generator>
       <LastGenOutput>Resources.Designer.cs</LastGenOutput>
@@ -63,6 +101,7 @@
       <AutoGen>True</AutoGen>
       <DependentUpon>Resources.resx</DependentUpon>
     </Compile>
+    <None Include="packages.config" />
     <None Include="Properties\Settings.settings">
       <Generator>SettingsSingleFileGenerator</Generator>
       <LastGenOutput>Settings.Designer.cs</LastGenOutput>
@@ -75,6 +114,16 @@
   </ItemGroup>
   <ItemGroup>
     <None Include="App.config" />
+  </ItemGroup>
+  <ItemGroup>
+    <ProjectReference Include="..\..\Graffiti.MST\Graffiti.MST\Graffiti.MST.csproj">
+      <Project>{c33f6b02-f8b4-4040-ae28-e30767d8a480}</Project>
+      <Name>Graffiti.MST</Name>
+    </ProjectReference>
+    <ProjectReference Include="..\..\MST.MES\MST.MES\MST.MES.csproj">
+      <Project>{3a75370e-11b7-4582-a6af-73caf3a9e997}</Project>
+      <Name>MST.MES</Name>
+    </ProjectReference>
   </ItemGroup>
   <Import Project="$(MSBuildToolsPath)\Microsoft.CSharp.targets" />
 </Project>

@@ -17,36 +17,38 @@ namespace Pakowanie_LED_v._2.DataStorage
         public static Label lQtyInBox;
         public class CurrentBoxDataStruct
         {
-            public MST.MES.OrderStructureByOrderNo.TestRecord TestResult { get; set; }
+            public TestResults.TestResultStruct TestResult { get; set; }
             public  VisualInspectionResults.VisualInspectionStruct VisualInspectionResult { get; set; }
             public  MST.MES.OrderStructureByOrderNo.BoxingInfo BoxingData { get; set; }
+            
             public  int moduleNo { get; set; }
             public  string ModuleSerialNo { get { return BoxingData.serialNo; } }
             public  DateTime BoxingDate { get { return BoxingData.boxingDate; } }
-            public  bool ReworkApproved
-            {
-                get
-                {
-                    try
-                    {
-                        if (TestResult.testTime > VisualInspectionResult.reworkDatetime & VisualInspectionResult.CurrentOverallState & TestResult.testResultOk) return true;
-                        else return false;
-                    }
-                    catch
-                    {
-                        return false;
-                    }
-                }
-            }
+
             public  string TestResultString
             {
                 get
                 {
-                    if(!string.IsNullOrWhiteSpace(TestResult.serialNo))
+                    if (!TestResult.TestResultOK) return "Brak";
+                    if (VisualInspectionResult.HasNgRecords)
                     {
-                        return TestResult.testResultOk ? "OK" : "NG"+TestResult.ngTyppe;
+                        DateTime? latestReworkTime = VisualInspectionResult
+                            .InspectionRecords
+                            .Where(r => r.reworkDatetime.HasValue)
+                            .Select(r => r.reworkDatetime.Value)
+                            .Max();
+
+                        if (!TestResult.OverallTestTime.HasValue || !latestReworkTime.HasValue) { return "Brak"; }
+                        if (TestResult.OverallTestTime.Value > latestReworkTime.Value) { return "OK"; }
                     }
-                    return "Brak testu";
+                    else
+                    {
+                        if (!string.IsNullOrWhiteSpace(TestResult.SerialNo))
+                        {
+                            return TestResult.TestResultOK ? "OK" : "NG";
+                        }
+                    }
+                    return "Brak";
                 }
             }
             public  string ViResultString
@@ -54,10 +56,10 @@ namespace Pakowanie_LED_v._2.DataStorage
                 get
                 {
                     
-                    if(VisualInspectionResult.viInspectionResult != null)
+                    if(VisualInspectionResult.HasNgRecords)
                     {
                         if (VisualInspectionResult.CurrentOverallState) return "OK (N)";
-                        return VisualInspectionResult.viInspectionResult;
+                        return "NG";
                     }
                     return "OK";//no record in db = OK
                 }
@@ -66,12 +68,19 @@ namespace Pakowanie_LED_v._2.DataStorage
             {
                 get
                 {
-                    return "s";
+                    if(BoxingData.moveToWarehouseDate.HasValue) { return $"Graffiti LP100: {BoxingData.movedByLp100}"; }
+                    if (VisualInspectionResult.HasNgRecords)
+                    {
+                        if (VisualInspectionResult.InspectionRecords.Select(r => r.typeNgScr.ToUpper()).Contains("SCR")) return "SCR";
+                        if (VisualInspectionResult.InspectionRecords.Where(r => !r.CurrentOverallState).Any()) return "NG";
+                    }
+                    return "";
                 }
             }
         }
         public static List<CurrentBoxDataStruct> CurrentBoxingList { get; set; }
         public static string CurrentBoxId { get; set; }
+        
         public static string CurrentBoxOrderNo
         {
             get
@@ -90,14 +99,13 @@ namespace Pakowanie_LED_v._2.DataStorage
         {
             get
             {
-                var testNG = CurrentBoxingList.Select(x => x.TestResult.testResultOk).Where(t => !t).Any();
+                var testNG = CurrentBoxingList.Select(x => x.TestResult.TestResultOK).Where(t => !t).Any();
                 var viNG = CurrentBoxingList.Select(x => x.ViResultString).Where(v => !v.StartsWith("OK")).Any();
                 if (testNG || viNG) return false;
                 return true;
             }
         }
-        
-        public static void AddModuleToBox(string moduleSerialNo)
+        public static void AddModuleToBox(string moduleSerialNo, string userName)
         {
             var serialSplitted = moduleSerialNo.Split('_');
             if (serialSplitted.Length != 3)
@@ -119,12 +127,13 @@ namespace Pakowanie_LED_v._2.DataStorage
                     orderNoPcb = pcbOrderNo,
                     orderNoBox = boxOrderNo
                     },
-                TestResult = new OrderStructureByOrderNo.TestRecord(),
+                TestResult = new TestResults.TestResultStruct(),
                 VisualInspectionResult = new VisualInspectionStruct(),
                 moduleNo = CurrentBoxingList.Count + 1,
             };
             CurrentBoxingList.Add(newItem);
-            MST.MES.SqlOperations.Boxing.InsertNewPcbToBoxSqlTable(moduleSerialNo, CurrentBoxId, DateTime.Now);
+            //MST.MES.SqlOperations.Boxing.InsertNewPcbToBoxSqlTable(moduleSerialNo, CurrentBoxId, DateTime.Now);
+            SqlBoxingConnection.InsertNewPcb(moduleSerialNo, CurrentBoxId, userName);
             BackgroundWorker bw = new BackgroundWorker();
             //myTimer.Elapsed += new ElapsedEventHandler((sender, e) => PlayMusicEvent(sender, e, musicNote));
 
@@ -132,18 +141,29 @@ namespace Pakowanie_LED_v._2.DataStorage
             bw.RunWorkerCompleted += new RunWorkerCompletedEventHandler((sender, e) => Bw_RunWorkerCompleted(sender, e, newItem));
             bw.RunWorkerAsync();
         }
+        private static void Bw_DoWork(object sender, DoWorkEventArgs e, CurrentBoxDataStruct newItem)
+        {
+            newItem.TestResult = TestResults.GetTestRecordsForPcbs(new string[] { newItem.ModuleSerialNo })[newItem.ModuleSerialNo];
+            var splittedSerial = newItem.ModuleSerialNo.Split('_');
+            if(splittedSerial.Length == 3)
+            {
+                var nc10 = splittedSerial[0];
+                if(nc10.Length == 10)
+                {
+                    var ncSeries = nc10.Substring(4, 3);
+                    if(ncSeries == "220")
+                    {
+                        newItem.TestResult.HiPotTestRequired = false; //Driver + Rset
+                    }
+                }
+            }
+            newItem.VisualInspectionResult = VisualInspectionResults.GetViRecordsForPcbs(new string[] { newItem.ModuleSerialNo })[newItem.ModuleSerialNo];
+        }
         private static void Bw_RunWorkerCompleted(object sender, RunWorkerCompletedEventArgs e, CurrentBoxDataStruct newItem)
         {
             olvBoxingList.RefreshObject(newItem);
             lQtyInBox.Text = CurrentBoxingList.Count().ToString();
         }
-
-        private static void Bw_DoWork(object sender, DoWorkEventArgs e, CurrentBoxDataStruct newItem)
-        {
-            newItem.TestResult = TestResults.GetTestRecordsForPcbs(new string[] { newItem.ModuleSerialNo })[newItem.ModuleSerialNo];
-            newItem.VisualInspectionResult = VisualInspectionResults.GetViRecordsForPcbs(new string[] { newItem.ModuleSerialNo })[newItem.ModuleSerialNo];
-        }
-
         private  static void LoadBox(string boxSerialNo)
         {
             var pckData = MST.MES.SqlDataReaderMethods.Boxing.GetBoxingForBoxId(boxSerialNo);
@@ -156,12 +176,11 @@ namespace Pakowanie_LED_v._2.DataStorage
                     CurrentBoxingList.Add(new CurrentBoxDataStruct
                     {
                         BoxingData = pcbEntry,
-                        TestResult = new OrderStructureByOrderNo.TestRecord(),
+                        TestResult = new TestResults.TestResultStruct(),
                         VisualInspectionResult = new VisualInspectionStruct(),
                         moduleNo = CurrentBoxingList.Count + 1
                     });
                 }
-
                 AddTestAndInspectionToBox(pcbSerials);
             }
         }
@@ -175,12 +194,14 @@ namespace Pakowanie_LED_v._2.DataStorage
                 return;
             }
             MST.MES.SqlOperations.Boxing.DeletePcbFromBoxSqlTable(qrCode);
+            CurrentBoxingList.Remove(matchingPcb.First());
             olvBoxingList.SetObjects(CurrentBoxingList);
+            lQtyInBox.Text = CurrentBoxingList.Count().ToString();
         }
 
         private static void AddTestAndInspectionToBox(string[] pcbs)
         {
-            Dictionary<string, OrderStructureByOrderNo.TestRecord> testResults = new Dictionary<string, OrderStructureByOrderNo.TestRecord>();
+            Dictionary<string, TestResults.TestResultStruct> testResults = new Dictionary<string, TestResults.TestResultStruct>();
             Dictionary<string, VisualInspectionStruct> viResults = new Dictionary<string, VisualInspectionStruct>();
             //List<Task> taskList = new List<Task>();
             //taskList.Add(Task.Run(() => testResults = TestResults.GetTestRecordsForPcbs(pcbs)));
@@ -194,6 +215,22 @@ namespace Pakowanie_LED_v._2.DataStorage
                 var curBoxPcb = CurrentBoxingList.Where(x => x.ModuleSerialNo == pcb).First();
 
                 curBoxPcb.TestResult = testResults[pcb];
+                var splittedSerial = curBoxPcb.ModuleSerialNo.Split('_');
+                if (splittedSerial.Length == 3)
+                {
+                    var nc10 = splittedSerial[0];
+                    if (nc10.Length == 10)
+                    {
+                        var ncSeries = nc10.Substring(4, 3);
+                        if (ncSeries == "220")
+                        {
+                            curBoxPcb.TestResult.HiPotTestRequired = false; //Driver + Rset
+                        }
+                    }
+
+                }
+
+
                 curBoxPcb.VisualInspectionResult = viResults[pcb];
             }
         }
@@ -201,6 +238,7 @@ namespace Pakowanie_LED_v._2.DataStorage
         public static void SetUpNewBox(string boxSerialNo)
         {
             CurrentBoxId = boxSerialNo;
+            
             CurrentBoxingList = new List<CurrentBoxDataStruct>();
             LoadBox(boxSerialNo);
             lQtyInBox.Text = CurrentBoxingList.Count().ToString(); 

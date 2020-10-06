@@ -10,10 +10,10 @@ namespace Pakowanie_LED_v._2.DataStorage
 {
     public class VisualInspectionResults
     {
-        public class VisualInspectionStruct
+        public class VisialInspectionRecord
         {
             public string ngReason { get; set; }
-            public string viInspectionResult { get; set; } 
+            public string typeNgScr { get; set; }
             public DateTime ngRegistrationDate { get; set; }
             public string ngSerialNo { get; set; }
             public string viOperator { get; set; }
@@ -21,6 +21,7 @@ namespace Pakowanie_LED_v._2.DataStorage
             public bool? postReworkViOK { get; set; }
             public DateTime? reworkDatetime { get; set; }
             public bool? reworkOK { get; set; }
+            public string ReworkOperator { get; set; }
             public string postReworkViOperator { get; set; }
             public bool CurrentOverallState
             {
@@ -37,55 +38,75 @@ namespace Pakowanie_LED_v._2.DataStorage
                 }
             }
         }
+        public class VisualInspectionStruct
+        {
+            public bool HasNgRecords { get { return InspectionRecords.Count > 0; } }
+            public List<VisialInspectionRecord> InspectionRecordsOld { get; set; } = new List<VisialInspectionRecord>();
+            public List<MST.MES.DrvIgn.VisualInspection.NgStructure> InspectionRecords { get; set; } = new List<MST.MES.DrvIgn.VisualInspection.NgStructure>();
+            public string ngReason { get { return string.Join(", ", InspectionRecords.Select(x => x.ngReason)); } }
+            public string ngTypeAndReason { get { return string.Join(", ", InspectionRecords.Select(x => $"{x.typeNgScr}-{x.ngReason}")); } }
+            public string ngSerialNo { get { return InspectionRecords.First().ngSerialNo; } }
+            public bool CurrentOverallState
+            {
+                get
+                {
+                    return InspectionRecords.Select(x => x.CurrentOverallState).All(x => x);
+                }
+            }
+        }
 
         public static Dictionary<string, VisualInspectionStruct> GetViRecordsForPcbs(string[] pcbs)
         {
             Dictionary<string, VisualInspectionStruct> result = new Dictionary<string, VisualInspectionStruct>();
+            if (!pcbs.Any()) return result;
             foreach (var pcb in pcbs)
             {
                 result.Add(pcb, new VisualInspectionStruct());
             }
             string connectionString = @"Data Source=MSTMS010;Initial Catalog=MES;User Id=mes;Password=mes;";
-            string query = @"SELECT order_no,serial_no,result,ng_type,datetime,rework_result,rework_datetime,post_rework_vi_result,vi_Operator,post_rework_OQA_result,First_vi_operator FROM MES.dbo.tb_NG_tracking WHERE serial_no in (" + string.Join(",", pcbs.Select(p => $"'{p}'")) +")";
-            // All columns
-            //order_no nvarchar(50)
-            //First_vi_operator
-            //serial_no nvarchar(50)
-            //result nvarchar(5)
-            //ng_type nvarchar(50)
-            //datetime smalldatetime
-            //rework_result nvarchar(5)
-            //rework_datetime smalldatetime
-            //post_rework_vi_result nvarchar(5)
-            //vi_Operator nvarchar(50)
-            //post_rework_OQA_result nvarchar(5)
-
+            string query = @"SELECT * FROM MES.dbo.v_NG_IGN_DRV WHERE serial_no in (" + string.Join(",", pcbs.Select(p => $"'{p}'")) +")";
+            //[Reason]
+            //  ,[serial_no]
+            //  ,[Rodzaj_wady]
+            //  ,[Nr_zlecenia]
+            //  ,[Data_rejestracji]
+            //  ,[Wynik_naprawy]
+            //  ,[Data_naprawy]
+            //  ,[OQA_zatw]
+            //  ,[Data_OQA]
+            //  ,[Vi_po_naprawie_wynik]
+            //  ,[Vi_po_naprawie_data]
+            //  ,[Ng_Rejestr_Nazwisko]
+            //  ,[Ng_Rejestracja_Imie]
+            //  ,[Naprawa_Imie]
+            //  ,[Naprawa_Nazwisko]
+            //  ,[Kontr_Finalna_Imie]
+            //  ,[Kontrola_Finalna_Nazwisko]
+            
             using (SqlConnection conn = new SqlConnection(@"Data Source=MSTMS010;Initial Catalog=MES;User Id=mes;Password=mes;"))
             {
                 using (var cmd = conn.CreateCommand())
                 {
-                    
-
                     cmd.Connection.ConnectionString = connectionString;
                     cmd.CommandText = query;
                     conn.Open();
                     using (SqlDataReader rdr = cmd.ExecuteReader())
                     {
-                        while (rdr.Read())
+                        while (rdr.Read()) 
                         {
-                            VisualInspectionStruct ngEntry = new VisualInspectionStruct();
-                            ngEntry.ngReason = SqlTools.SafeGetString(rdr, "ng_type");
-                            ngEntry.ngRegistrationDate = SqlTools.SafeGetDateTime(rdr, "datetime");
-                            ngEntry.ngSerialNo = SqlTools.SafeGetString(rdr, "serial_no");
-                            ngEntry.viOperator = SqlTools.SafeGetString(rdr, "First_vi_operator");
-                            ngEntry.oqaInspectionOk = SqlTools.SafeGetOkNgBoolNullable(rdr, "post_rework_OQA_result");
-                            ngEntry.postReworkViOK = SqlTools.SafeGetOkNgBoolNullable(rdr, "post_rework_vi_result");
-                            ngEntry.reworkDatetime = SqlTools.SafeGetDateTime(rdr, "rework_datetime");
-                            ngEntry.reworkOK = SqlTools.SafeGetOkNgBoolNullable(rdr, "rework_result");
-                            ngEntry.viInspectionResult = SqlTools.SafeGetString(rdr, "result"); //NG, SCRAP??
-                            ngEntry.postReworkViOperator = SqlTools.SafeGetString(rdr, "vi_Operator");
-                            
-                            result[ngEntry.ngSerialNo] = ngEntry;
+                            VisialInspectionRecord ngRecord = new VisialInspectionRecord();
+                            ngRecord.ngReason = SqlTools.SafeGetString(rdr, "Reason");
+                            ngRecord.typeNgScr = SqlTools.SafeGetString(rdr, "Rodzaj_wady");
+                            ngRecord.ngRegistrationDate = SqlTools.SafeGetDateTime(rdr, "Data_rejestracji");
+                            ngRecord.ngSerialNo = SqlTools.SafeGetString(rdr, "serial_no");
+                            ngRecord.viOperator = SqlTools.SafeGetString(rdr, "Rejestr_imie_nazwisko");
+                            ngRecord.oqaInspectionOk = SqlTools.SafeGetBoolNullableBinary(rdr, "OQA_zatw");
+                            ngRecord.postReworkViOK = SqlTools.SafeGetBoolNullableBinary(rdr, "Vi_po_naprawie_wynik");
+                            ngRecord.reworkDatetime = SqlTools.SafeGetDateTime(rdr, "Data_naprawy");
+                            ngRecord.reworkOK = SqlTools.SafeGetBoolNullableBinary(rdr, "Wynik_naprawy");
+                            ngRecord.ReworkOperator = SqlTools.SafeGetString(rdr, "Naprawa_imie_nazwisko");
+                            ngRecord.postReworkViOperator = SqlTools.SafeGetString(rdr, "Vi_po_naprawie_imie_nazwisko");
+                            result[ngRecord.ngSerialNo].InspectionRecords.Add(ngRecord);
                         }
                     }
                 }

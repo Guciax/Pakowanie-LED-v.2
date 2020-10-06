@@ -23,15 +23,31 @@ namespace Pakowanie_LED_v._2
             CurrentOrderBoxing.lOtherBoxesInfo = lOtherBoxesInfo;
             CurrentBoxData.lQtyInBox = lQtyInBox;
             CurrentBoxData.olvBoxingList = olvCurrentBox;
-
+            CurrentOrderBoxing.dgvBoxesList = dgvBoxesList;
+            CurrentBoxingUser.lCurrentUser = lCurrentUser;
         }
         private void Form1_Load(object sender, EventArgs e)
         {
+            if (StartUp.SwitchToLocalFile())
+            {
+                this.Close();
+            }
             this.ActiveControl = tbScanQr;
             System.Reflection.Assembly assembly = System.Reflection.Assembly.GetExecutingAssembly();
             FileVersionInfo fvi = FileVersionInfo.GetVersionInfo(assembly.Location);
             string version = fvi.FileVersion;
             this.Text += version;
+# if DEBUG
+            bDebug.Visible = true;
+# endif
+        }
+        private void LoadBox(string boxId)
+        {
+            if (string.IsNullOrWhiteSpace(boxId)) return;
+            CurrentBoxData.SetUpNewBox(boxId);
+            olvCurrentBox.SetObjects(CurrentBoxData.CurrentBoxingList);
+            CurrentOrderBoxing.ReloadBoxes();
+            lBoxNo.Text = CurrentBoxData.CurrentBoxId;
         }
         private void tbScanQr_Leave(object sender, EventArgs e)
         {
@@ -39,14 +55,13 @@ namespace Pakowanie_LED_v._2
         }
         private void bNewBox_Click(object sender, EventArgs e)
         {
+            if (CurrentBoxingUser.UserData == null) return;
+
             using (Forms.ScanQr scanForm = new Forms.ScanQr())
             {
                 if (scanForm.ShowDialog() == DialogResult.OK)
                 {
-                    CurrentBoxData.SetUpNewBox(scanForm.qrCode);
-                    olvCurrentBox.SetObjects(CurrentBoxData.CurrentBoxingList);
-                    CurrentOrderBoxing.ReloadBoxes();
-                    lBoxNo.Text = CurrentBoxData.CurrentBoxId;
+                    LoadBox(scanForm.qrCode);
                 }
             }
         }
@@ -55,12 +70,14 @@ namespace Pakowanie_LED_v._2
             if (e.KeyChar == (char)13)
             {
                 e.Handled = true;
+                
                 string serialNo = tbScanQr.Text;
                 tbScanQr.Text = "";
+                if (CurrentBoxingUser.UserData == null) return;
                 var splittedSerial = serialNo.Split('_');
                 if (splittedSerial.Length != 3)
                 {
-                    MessageBox.Show($"Nie prawidłowy kod QR {serialNo}");
+                    MessageBox.Show($"Nieprawidłowy kod QR {serialNo}");
                     return;
                 }
                 string pcb10Nc = splittedSerial[0];
@@ -68,15 +85,24 @@ namespace Pakowanie_LED_v._2
 
                 if (pcb10Nc != CurrentBoxData.CurrentBox10Nc)
                 {
-                    MessageBox.Show("Nie prawidłowy numer 12NC !!!" + Environment.NewLine
+                    MessageBox.Show("Nieprawidłowy numer 12NC !!!" + Environment.NewLine
                         + $"12NC opakowania: {CurrentBoxData.CurrentBox10Nc}" + Environment.NewLine
                         + $"12NC kodu QR: {pcb10Nc}");
                     return;
                 }
-
-                CurrentBoxData.AddModuleToBox(serialNo);
-                olvCurrentBox.SetObjects(CurrentBoxData.CurrentBoxingList);
-                CurrentOrderBoxing.ReloadBoxes();
+                var boxingData = SqlBoxingConnection.GetBoxingForPcb(serialNo);
+                if(boxingData == null)
+                {
+                    CurrentBoxData.AddModuleToBox(serialNo, CurrentBoxingUser.UserData.Name);
+                    olvCurrentBox.SetObjects(CurrentBoxData.CurrentBoxingList);
+                    CurrentOrderBoxing.ReloadBoxes();
+                }
+                else
+                {
+                    MessageBox.Show($"Ten wyrób znajduje się w innym kartonie." + Environment.NewLine
+                        + $"ID kartonu: {boxingData.boxId}" + Environment.NewLine
+                        + $"Data pakowania: {boxingData.boxingDate}");
+                }
             }
         }
         private void objectListView1_BeforeSorting(object sender, BrightIdeasSoftware.BeforeSortingEventArgs e)
@@ -91,8 +117,22 @@ namespace Pakowanie_LED_v._2
         private void olvCurrentBox_FormatRow(object sender, FormatRowEventArgs e)
         {
             CurrentBoxDataStruct item = (CurrentBoxDataStruct)e.Model;
+            if (item.TestResultString.StartsWith("OK") & item.ViResultString.StartsWith("OK"))
+            {
+                if (item.moduleNo % 2 == 0)
+                {
+                    e.Item.BackColor = MST.MES.Colors.MaterialColorPalettes.Green().light;
+                }
+                else
+                {
+                    e.Item.BackColor = MST.MES.Colors.MaterialColorPalettes.Green().ultraLight;
+                }
+                    
+                
+            }
             if (!item.TestResultString.StartsWith("OK"))
             {
+                
                 e.Item.BackColor = Color.Red;
                 e.Item.ForeColor = Color.White;
             }
@@ -101,11 +141,33 @@ namespace Pakowanie_LED_v._2
                 e.Item.BackColor = Color.Red;
                 e.Item.ForeColor = Color.White;
             }
+            
         }
         private void tCheckNg_Tick(object sender, EventArgs e)
         {
+            if (CurrentBoxData.CurrentBoxingList == null) return;
             var viNg = CurrentBoxData.CurrentBoxingList.Where(i => !i.VisualInspectionResult.CurrentOverallState).ToList();
-            var testNg = CurrentBoxingList.Where(i => !i.TestResult.testResultOk).ToList();
+            var testNg = CurrentBoxingList.Where(i => i.TestResultString!="OK").ToList();
+
+            if (!viNg.Any() & !testNg.Any())
+            {
+                tNgFlashPanel.Enabled = false;
+                pNgFlashPanel.BackColor = Color.White;
+                pNgFlashPanel.ForeColor = Color.Black;
+                lTestStatus.Text = "Status testu: OK";
+                lViStatus.Text = "Status kontroli wzrokowej: OK";
+                return;
+            }
+
+            if (viNg.Any())
+            {
+                lViStatus.Text = "Status kontroli wzrokowej: NG";
+            }
+            if (testNg.Any())
+            {
+                lTestStatus.Text = "Status kontroli wzrokowej: NG";
+            }
+            tNgFlashPanel.Enabled = true;
 
             BackgroundWorker bw = new BackgroundWorker();
             bw.DoWork += new DoWorkEventHandler((sender1, e1) => Bw_DoWork(sender1, e1, viNg, testNg));
@@ -129,17 +191,18 @@ namespace Pakowanie_LED_v._2
 
             foreach (var viResultEntry in viResults)
             {
-                var viResult = testNgList.Where(x => x.ModuleSerialNo == viResultEntry.Key).First();
+                var viResult = viNgList.Where(x => x.ModuleSerialNo == viResultEntry.Key).First();
                 viResult.VisualInspectionResult = viResultEntry.Value;
             }
         }
         private void bRemoveModule_Click(object sender, EventArgs e)
         {
+            if (CurrentBoxingUser.UserData == null) return;
             using (ScanQr scanForm = new ScanQr())
             {
                 if (scanForm.ShowDialog() == DialogResult.OK)
                 {
-                    var boxInfo = MST.MES.SqlDataReaderMethods.Boxing.GetBoxingForSerialNo(scanForm.qrCode);
+                    var boxInfo = SqlBoxingConnection.GetBoxingForPcb(scanForm.qrCode);
                     if (boxInfo == null)
                     {
                         MessageBox.Show("Brak kodu w bazie danych");
@@ -151,22 +214,34 @@ namespace Pakowanie_LED_v._2
                             + "Aby przesnieść go do innego kartonu użyj funkcji przenieś");
                         return;
                     }
+                    if(boxInfo.boxId!= CurrentBoxData.CurrentBoxId)
+                    {
+                        MessageBox.Show("Wyrób nie należy do aktualnie wczutanego kartonu." + Environment.NewLine
+                            + $"Skanowanu kod QR: {scanForm.qrCode}" + Environment.NewLine
+                            + $"Aktualny karton: {CurrentBoxData.CurrentBoxId}" + Environment.NewLine
+                            + $"Karton zeskanowanego wyrobu: {boxInfo.boxId}");
+                        return;
+                    }
                     CurrentBoxData.RemovePcbFromBox(scanForm.qrCode);
                 }
             }
         }
         private void bMoveModule_Click(object sender, EventArgs e)
         {
-            using (MovePcbToBox scanForm = new MovePcbToBox())
+            if (CurrentBoxingUser.UserData == null) return;
+
+            using (MovePcbToBoxBatch scanForm = new MovePcbToBoxBatch())
             {
                 if (scanForm.ShowDialog() == DialogResult.OK)
                 {
-                    olvBoxingList.SetObjects(CurrentBoxingList);
+                    LoadBox(scanForm.newBoxId);
                 }
             }
         }
         private void bRemoveBox_Click(object sender, EventArgs e)
         {
+            if (CurrentBoxingUser.UserData == null) return;
+
             DialogResult dialogResult = MessageBox.Show("UWAGA!!!" + Environment.NewLine + "Spowoduje to usunięcie całego kartonu i wszystkich paneli." + Environment.NewLine + Environment.NewLine + "Czy na pewno chcesz kontynuować", "Usunięcie kartonu", MessageBoxButtons.YesNo);
             if (dialogResult == DialogResult.Yes)
             {
@@ -177,30 +252,75 @@ namespace Pakowanie_LED_v._2
                     return;
                 }
                 MST.MES.SqlOperations.Boxing.DeleteBox(CurrentBoxId);
-                CurrentBoxData.SetUpNewBox(CurrentBoxId);
+                LoadBox(CurrentBoxId);
             }
         }
         private void bMoveBox_Click(object sender, EventArgs e)
         {
+            if (CurrentUser.UserData == null) return;
+
             using (ChangeBoxId changeBoxForm = new ChangeBoxId())
             {
                 if (changeBoxForm.ShowDialog() == DialogResult.OK)
                 {
-                    CurrentBoxData.SetUpNewBox(changeBoxForm.newBoxId);
+                    LoadBox(changeBoxForm.newBoxId);
                 }
             }
         }
-
-        private void olvCurrentBox_MouseHover(object sender, EventArgs e)
-        {
-            
-        }
-
         private void olvCurrentBox_ItemMouseHover(object sender, ListViewItemMouseHoverEventArgs e)
         {
-            e.Item.SubItems[3].Font = new Font(e.Item.SubItems[3].Font, FontStyle.Underline);
+            e.Item.Font = new Font(e.Item.Font, FontStyle.Underline);
+            
+        }
+        private void Form1_FormClosing(object sender, FormClosingEventArgs e)
+        {
+            SqlBoxingConnection.CloseConnection();
+        }
+        private void tNgFlashPanel_Tick(object sender, EventArgs e)
+        {
+            if(pNgFlashPanel.BackColor == Color.White)
+            {
+                pNgFlashPanel.BackColor = Color.Red;
+                pNgFlashPanel.ForeColor = Color.White;
+            }
+            else
+            {
+                pNgFlashPanel.BackColor = Color.White;
+                pNgFlashPanel.ForeColor = Color.Black;
+            }
+        }
+        private void olvCurrentBox_CellClick(object sender, CellClickEventArgs e)
+        {
+            CurrentBoxDataStruct item = (CurrentBoxDataStruct)e.Model;
+            if (e.ColumnIndex != 1) return;
+            if (item == null) return;
+            using(ShowNgInfo infoForm = new ShowNgInfo(item))
+            {
+                ;
+                infoForm.ShowDialog();
+            }
+            //'K:1010117345_2005260_005'
+        }
+        private void olvCurrentBox_CellOver(object sender, CellOverEventArgs e)
+        {
+            if (e.SubItem == null) return;
+            if (e.SubItem.Text.Contains("_"))
+            {
+                e.SubItem.Font = new Font(e.SubItem.Font, FontStyle.Underline);
+            }
+        }
+        private void bRefresh_Click(object sender, EventArgs e)
+        {
+            LoadBox(CurrentBoxId);
+        }
+        private void bDebug_Click(object sender, EventArgs e)
+        {
+            string[] serial = new string[] { "1010120106_1621427_03625", "1010120106_1621427_03612", "1010120106_1621427_03614", "1010120106_1621427_03604", "1010120106_1621427_03644", "1010120106_1621427_04210", "1010120106_1621427_04223" };
+            var res = TestResults.GetTestRecordsForPcbs(serial);
+        }
+        private void bLogoutUser_Click(object sender, EventArgs e)
+        {
+            CurrentBoxingUser.LogoutUser();
         }
     }
 }
-    
-

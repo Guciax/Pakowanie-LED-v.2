@@ -31,9 +31,10 @@ namespace Pakowanie_LED_v._2.Forms
         private void tbNewBox_KeyPress(object sender, KeyPressEventArgs e)
         {
 
-                e.Handled = true;
+                
             if (e.KeyChar == (char)13)
             {
+                e.Handled = true;
                 var oldBox = MST.MES.SqlDataReaderMethods.Boxing.GetBoxingForBoxId(tbCurrentBox.Text);
                 List<MST.MES.OrderStructureByOrderNo.BoxingInfo> newBox = MST.MES.SqlDataReaderMethods.Boxing.GetBoxingForBoxId(tbNewBox.Text);
 
@@ -66,13 +67,11 @@ namespace Pakowanie_LED_v._2.Forms
                     return;
                 }
 
-                string dialogText = "Aktualny karton: " + Environment.NewLine +
-                    old12Nc + Environment.NewLine +
+                string dialogText = "Aktualny karton 12NC: " + old12Nc.Insert(4," ").Insert(8," ") + Environment.NewLine +
                     $"Ilość: {oldBox.Count}szt." + Environment.NewLine +
-                    "Nowy karton: " + Environment.NewLine +
-                    new12Nc + Environment.NewLine +
+                    "Nowy karton 12NC: "  +   new12Nc.Insert(4," ").Insert(8," ") + Environment.NewLine +
                     $"Ilość: {newBox.Count}szt." + Environment.NewLine +
-                    $"Po połączeniu w nocym kartonie będzie {oldBox.Count + newBox.Count}szt." + Environment.NewLine +
+                    $"Po połączeniu w nowym kartonie będzie {oldBox.Count + newBox.Count}szt." + Environment.NewLine +
                     "Czy chcesz kontynuować?";
 
                 DialogResult dialogResult = MessageBox.Show(dialogText, "Info", MessageBoxButtons.YesNo);

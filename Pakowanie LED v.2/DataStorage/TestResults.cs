@@ -8,48 +8,116 @@ using System.Threading.Tasks;
 
 namespace Pakowanie_LED_v._2.DataStorage
 {
-    class TestResults
+    public class TestResults
     {
-
-        public static Dictionary<string, OrderStructureByOrderNo.TestRecord> GetTestRecordsForPcbs(string[] pcbs)
+        public class TestResultStruct
         {
-            if (!pcbs.Any()) return new Dictionary<string, OrderStructureByOrderNo.TestRecord>();
-            //Dictionary<int, string> testerIdToName = TesterIdToName();
-            Dictionary<string, OrderStructureByOrderNo.TestRecord> result = new Dictionary<string, OrderStructureByOrderNo.TestRecord>();
-            foreach (var pcb in pcbs)
+            public string SerialNo { get; set; }
+            public string FuncTestResultString { get; set; }
+            public bool? FuncTestOK{
+                get{
+
+                    if (FuncTestResultString == null) return null;
+                    return FuncTestResultString == "Passed";
+                }
+            }
+            private string _HiPotTestResultString;
+            public string HiPotTestResultString
             {
-                result.Add(pcb, new OrderStructureByOrderNo.TestRecord());
+                get
+                {
+                    if (!HiPotTestRequired) return "Passed";
+                    return _HiPotTestResultString;
+                }
+                set
+                {
+                    _HiPotTestResultString = value;
+                }
+            }
+            public bool? HiPotTestOK
+            {
+                get
+                {
+                    if (!HiPotTestRequired)
+                    {
+                        return true;
+                    }
+                    if (HiPotTestResultString == null) return null;
+                    return HiPotTestResultString == "Passed";
+                }
+            }
+            public bool HiPotTestRequired { get; set; } = true;
+            public DateTime? FuncTestTime { get; set; }
+            public DateTime? HiPotTestTime { get; set; }
+            public DateTime? OverallTestTime { get
+                {
+                    if (!FuncTestTime.HasValue || !HiPotTestTime.HasValue) return null;
+                    return (new DateTime[] { FuncTestTime.Value, HiPotTestTime.Value }).Min();
+                } }
+            public bool TestResultOK
+            {
+                get
+                {
+                    if(FuncTestOK.HasValue & HiPotTestOK.HasValue)
+                    {
+                        return FuncTestOK.Value & HiPotTestOK.Value;
+                    }
+                    return false;
+                }
+            }
+        }
+        public static Dictionary<string, TestResultStruct> GetTestRecordsForPcbs(string[] serialsList)
+        {
+            if (!serialsList.Any()) return new Dictionary<string, TestResultStruct>();
+            //Dictionary<int, string> testerIdToName = TesterIdToName();
+            Dictionary<string, TestResultStruct> result = new Dictionary<string, TestResultStruct>();
+            foreach (var pcb in serialsList)
+            {
+                result.Add(pcb, new TestResultStruct());
             }
             string connectionString = @"Data Source=MSTMS010;Initial Catalog=MES;User Id=mes;Password=mes;";
-            string query = $@"  Select * FROM (SELECT serial_no, result, DataCzas,ng_type,
-                               ROW_NUMBER() OVER (PARTITION BY serial_no ORDER BY DataCzas desc) AS RowNumber
-                               FROM [MES].[dbo].[tb_tester_measurements]
-                               where serial_no in ({string.Join(",", pcbs.Select(p => $"'{p}'"))})) AS a
-                               WHERE   a.RowNumber = 1";
+            string querry = $@"WITH ranked_messages AS (
+                                    SELECT m.*, ROW_NUMBER() OVER (PARTITION BY TEST_TYPE ORDER BY START_DATE_TIME DESC) AS rn
+                                    FROM tb_elektronika_tester_pomiary AS m  where UUT_SERIAL_NUMBER = @serial )
+                                    SELECT UUT_SERIAL_NUMBER,TEST_TYPE, UUT_STATUS, START_DATE_TIME FROM ranked_messages WHERE rn = 1;";
 
-            using (SqlConnection conn = new SqlConnection(@"Data Source=MSTMS010;Initial Catalog=MES;User Id=mes;Password=mes;"))
+            using (SqlConnection conn = new SqlConnection(@"Data Source=MSTMS010;Initial Catalog=MES;User Id=mes;Password=mes;")) 
             {
                 using (var cmd = conn.CreateCommand())
                 {
-
                     cmd.Connection.ConnectionString = connectionString;
-                    cmd.CommandText = query;
+                    cmd.CommandText = querry;
+                    SqlParameter pSerial = new SqlParameter() { ParameterName = "@serial" };
+                    cmd.Parameters.Add(pSerial);
                     conn.Open();
-                    using (SqlDataReader rdr = cmd.ExecuteReader())
+                    foreach (var serial in serialsList)
                     {
-                        while (rdr.Read())
+                        pSerial.Value = serial;
+                        using (SqlDataReader rdr = cmd.ExecuteReader())
                         {
-                            string serialNo = SqlTools.SafeGetString(rdr, "serial_no");
+                            while (rdr.Read())
+                            {
+                                string serialNo = SqlTools.SafeGetString(rdr, "UUT_SERIAL_NUMBER").Trim();
+                                string testResult = SqlTools.SafeGetString(rdr, "UUT_STATUS").Trim();
+                                string testType = SqlTools.SafeGetString(rdr, "TEST_TYPE").Trim();
+                                DateTime testTime = SqlTools.SafeGetDateTime(rdr, "START_DATE_TIME");
 
-                            OrderStructureByOrderNo.TestRecord testRecord = new OrderStructureByOrderNo.TestRecord();
-                            testRecord.serialNo = serialNo;
-                            testRecord.testResultOk = SqlTools.SafeGetString(rdr, "result") == "OK";
-                            testRecord.ngTyppe = SqlTools.SafeGetString(rdr, "ng_type");
-                            testRecord.testTime = SqlTools.SafeGetDateTime(rdr, "DataCzas");
-
-                            result[serialNo] = testRecord;
+                                result[serialNo].SerialNo = serialNo;
+                                
+                                if (testType == "Func")
+                                {
+                                    result[serialNo].FuncTestResultString = testResult;
+                                    result[serialNo].FuncTestTime = testTime;
+                                }
+                                else
+                                {
+                                    result[serialNo].HiPotTestResultString = testResult;
+                                    result[serialNo].HiPotTestTime = testTime;
+                                }
+                            }
                         }
                     }
+                    
                 }
             }
             return result;

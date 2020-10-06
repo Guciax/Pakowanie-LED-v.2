@@ -41,7 +41,7 @@ namespace Pakowanie_LED_v._2.Forms
         {
             if (e.KeyChar == (char)13)
             {
-                var boxingInfo = MST.MES.SqlDataReaderMethods.Boxing.GetBoxingForSerialNo(tbSerialNumber.Text);
+                var boxingInfo = SqlBoxingConnection.GetBoxingForPcb(tbSerialNumber.Text);
                 if (boxingInfo == null)
                 {
                     MessageBox.Show("Brak danych dla podanego wyrobu");
@@ -52,8 +52,20 @@ namespace Pakowanie_LED_v._2.Forms
                     MessageBox.Show("Podany numer kartonu nie zgadza się z numerem zapisanym w bazie danych");
                     return;
                 }
+                if(boxingInfo.moveToWarehouseDate != null)
+                {
+                    var count = SqlBoxingConnection.HowManyModulesMovedAsLp100(boxingInfo.movedByLp100);
+                    if (count > 1)
+                    {
+                        MessageBox.Show("Wyrób znajduje się w kartonie, który został przesunięty systemowo." + Environment.NewLine 
+                            +$"Pod tym numerem kartonu tym znajduje się: {count}szt. wyrobów."
+                            + "Oddziel wyroby od kartonu albo użyj opcji przenieś karton aby przenieść cały karton.");
+                        return;
+                    }
+                }
                 MST.MES.SqlOperations.Boxing.UpdateBoxIdForSerial(tbSerialNumber.Text, tbNewBox.Text);
                 e.Handled = true;
+                
                 this.DialogResult = DialogResult.OK;
             }
         }
